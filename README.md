@@ -4,7 +4,7 @@ A simple interactive button inspired by the end credits scene from the movie Eli
 
 ## Try it out
 
-Go to https://chippokiddo.github.io/fairylights/ and enjoy clicking! 🦎✨
+Go to https://chippokiddo.github.io/lizard/ and enjoy clicking! 🦎✨
 
 ## Attribution
 
