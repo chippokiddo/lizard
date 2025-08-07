@@ -23,7 +23,7 @@ body {
     text-align: center;
 }
 
-.video-button {
+.gif-button {
     position: relative;
     width: 300px;
     height: 200px;
@@ -40,29 +40,16 @@ body {
     touch-action: manipulation;
 }
 
-.video-button:hover {
+.gif-button:hover {
     transform: scale(1.05);
     box-shadow: 0 12px 35px rgba(0, 0, 0, 0.3);
 }
 
-.video-button:active {
+.gif-button:active {
     transform: scale(0.98);
 }
 
-video {
-    -webkit-playsinline: true;
-    outline: none;
-    border: none;
-}
-
-video::-webkit-media-controls,
-video::-webkit-media-controls-panel,
-video::-webkit-media-controls-play-button,
-video::-webkit-media-controls-start-playback-button {
-    display: none;
-}
-
-.video-overlay {
+.gif-overlay {
     position: absolute;
     top: 0;
     left: 0;
@@ -71,6 +58,8 @@ video::-webkit-media-controls-start-playback-button {
     object-fit: cover;
     pointer-events: none;
     z-index: 1;
+    opacity: 0;
+    transition: opacity 0.3s ease;
 }
 
 .counter {
@@ -105,7 +94,7 @@ video::-webkit-media-controls-start-playback-button {
     }
 }
 
-.video-button.clicked {
+.gif-button.clicked {
     animation: bounce 0.2s ease;
 }
 
@@ -119,18 +108,18 @@ video::-webkit-media-controls-start-playback-button {
 }
 
 @media (max-width: 768px), (hover: none) {
-    .video-button {
+    .gif-button {
         width: 280px;
         height: 180px;
         transform: none;
     }
 
-    .video-button:hover {
+    .gif-button:hover {
         transform: none;
         box-shadow: 0 8px 25px rgba(0, 0, 0, 0.2);
     }
 
-    .video-button:active {
+    .gif-button:active {
         transform: scale(0.95);
         transition: transform 0.1s ease;
     }

@@ -1,45 +1,18 @@
 // DOM elements
-const videoButton = document.getElementById('videoButton');
+const gifButton = document.getElementById('gifButton');
 const clickCounter = document.getElementById('clickCounter');
 
 // State variables
 let clickCount = 0;
-let isProcessing = false;
 let userHasInteracted = false;
 
 // Device detection utilities
-const isIOSSafari = () => {
-    const ua = navigator.userAgent;
-    return /iPhone|iPad|iPod/i.test(ua) && /Safari/i.test(ua) && !/CriOS|FxiOS|EdgiOS/i.test(ua);
-};
-
 const isMobileDevice = () => {
     return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || ('ontouchstart' in window);
 };
 
-// Media element creators
-function createVisualVideo() {
-    const video = document.createElement('video');
-
-    // Configure video attributes
-    Object.assign(video, {
-        muted: true,
-        playsInline: true,
-        controls: false,
-        disablePictureInPicture: true,
-        src: 'assets/lizard.mp4',
-        className: 'video-overlay',
-        preload: isIOSSafari() ? 'auto' : 'metadata'
-    });
-
-    // Set required attributes for iOS
-    video.setAttribute('playsinline', 'true');
-    video.setAttribute('webkit-playsinline', 'true');
-
-    return video;
-}
-
-function createAudioElement() {
+// Create new audio element for each click
+function createAudio() {
     const audio = new Audio('assets/lizard.m4a');
     audio.volume = 0.7;
     audio.preload = 'auto';
@@ -52,108 +25,73 @@ function createAudioElement() {
         pointer-events: none !important;
     `;
 
+    document.body.appendChild(audio);
     return audio;
 }
 
-// Media playback functions
-async function playVideo(video) {
-    try {
-        video.currentTime = 0;
+// Create GIF element
+function createGifElement() {
+    const gif = document.createElement('img');
 
-        // Wait for video to be ready on iOS
-        if (isIOSSafari() && video.readyState < 3) {
-            await waitForVideoReady(video);
-        }
+    Object.assign(gif, {
+        src: 'assets/lizard.gif',
+        alt: 'Lizard animation',
+        className: 'gif-overlay'
+    });
 
-        await video.play();
-        console.log('Video playing successfully');
-        return true;
-    } catch (error) {
-        console.error('Video play failed:', error.message);
-        return false;
-    }
+    return gif;
 }
 
-async function playAudio(audio) {
+// Play audio
+async function playAudio() {
+    if (!userHasInteracted) {
+        console.log('Skipping audio - no user interaction yet');
+        return false;
+    }
+
     try {
-        if (!userHasInteracted) {
-            console.log('Skipping audio - no user interaction yet');
-            return false;
-        }
+        const audioElement = createAudio();
 
-        audio.currentTime = 0;
+        // Auto-cleanup audio when it ends
+        audioElement.addEventListener('ended', () => {
+            if (audioElement.parentNode) {
+                audioElement.remove();
+            }
+        }, { once: true });
 
-        // Wait for audio to load if needed
-        if (audio.readyState < 3) {
-            await waitForAudioReady(audio);
-        }
-
-        await audio.play();
+        audioElement.currentTime = 0;
+        await audioElement.play();
         console.log('Audio playing successfully');
-        return true;
+        return audioElement;
     } catch (error) {
         console.warn('Audio play failed:', error.message);
         return false;
     }
 }
 
-// Helper functions for media loading
-function waitForVideoReady(video) {
-    return new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error('Video load timeout')), 2000);
+// Play GIF animation once
+function playGif(gifElement) {
+    try {
+        // Force GIF restart by reloading with timestamp
+        const currentSrc = gifElement.src;
+        const baseSrc = currentSrc.split('?')[0];
+        const separator = '?';
+        gifElement.src = baseSrc + separator + 't=' + Date.now();
 
-        const cleanup = () => {
-            clearTimeout(timeout);
-            video.removeEventListener('canplaythrough', onReady);
-            video.removeEventListener('error', onError);
-        };
+        // Show the GIF
+        gifElement.style.opacity = '1';
 
-        const onReady = () => {
-            cleanup();
-            resolve();
-        };
+        // Stop the GIF after one loop
+        setTimeout(() => {
+            gifElement.style.opacity = '0';
+        }, 1000); // Match 1-second audio duration
 
-        const onError = (e) => {
-            cleanup();
-            reject(e);
-        };
-
-        video.addEventListener('canplaythrough', onReady);
-        video.addEventListener('error', onError);
-
-        if (video.networkState === 3) {
-            video.load();
-        }
-    });
-}
-
-function waitForAudioReady(audio) {
-    return new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error('Audio load timeout')), 2000);
-
-        const cleanup = () => {
-            clearTimeout(timeout);
-            audio.removeEventListener('canplaythrough', onReady);
-            audio.removeEventListener('error', onError);
-        };
-
-        const onReady = () => {
-            cleanup();
-            resolve();
-        };
-
-        const onError = (e) => {
-            cleanup();
-            reject(e);
-        };
-
-        audio.addEventListener('canplaythrough', onReady);
-        audio.addEventListener('error', onError);
-
-        if (audio.networkState === 3) {
-            audio.load();
-        }
-    });
+        console.log('GIF playing successfully');
+        return true;
+    } catch (error) {
+        console.error('GIF play failed:', error.message);
+        return false;
+    }
 }
 
 // UI effects
@@ -182,97 +120,71 @@ function createRipple(event) {
 }
 
 // Cleanup function
-function cleanupMedia(video, audio) {
-    const elements = [video, audio].filter(Boolean);
-
-    elements.forEach(element => {
+function cleanupMedia(gif) {
+    if (gif && gif.parentNode) {
         try {
-            element.pause();
-            element.currentTime = 0;
-
-            if (isIOSSafari()) {
-                element.src = '';
-                if (element.load) element.load();
-            }
-
-            if (element.parentNode) {
-                element.remove();
-            }
+            gif.style.opacity = '0';
+            setTimeout(() => {
+                if (gif.parentNode) {
+                    gif.remove();
+                }
+            }, 300); // Fade out transition
         } catch (error) {
             console.warn('Cleanup error:', error.message);
         }
-    });
+    }
 }
 
 // Main click handler
-videoButton.addEventListener('click', async function (event) {
-    if (isProcessing) return;
+gifButton.addEventListener('click', async function (event) {
+    // Remove isProcessing check to allow rapid clicking
 
     event.preventDefault();
     event.stopPropagation();
 
-    isProcessing = true;
     userHasInteracted = true;
 
     // Update counter and add visual feedback
     clickCount++;
     clickCounter.textContent = `Clicks: ${clickCount}`;
     createRipple(event);
-    videoButton.classList.add('clicked');
+    gifButton.classList.add('clicked');
 
-    let video, audio;
+    let gif;
 
     try {
-        // Create media elements
-        video = createVisualVideo();
-        audio = createAudioElement();
-
-        videoButton.appendChild(video);
-        document.body.appendChild(audio);
-
-        // Set up cleanup when both media end
-        let mediaEndedCount = 0;
-        const onMediaEnd = () => {
-            mediaEndedCount++;
-            if (mediaEndedCount >= 2) {
-                cleanupMedia(video, audio);
-            }
-        };
-
-        video.addEventListener('ended', onMediaEnd, {once: true});
-        audio.addEventListener('ended', onMediaEnd, {once: true});
-
-        // Handle errors
-        video.addEventListener('error', () => cleanupMedia(video, audio), {once: true});
+        // Create GIF element
+        gif = createGifElement();
+        gifButton.appendChild(gif);
 
         // Start playback
-        await Promise.allSettled([
-            playVideo(video),
-            playAudio(audio)
-        ]);
+        // both can happen independently
+        const audioPromise = playAudio();
+        const gifPlaying = playGif(gif);
 
-        // Emergency cleanup after 10 seconds
-        setTimeout(() => cleanupMedia(video, audio), 10000);
+        audioPromise; // Audio will play and auto-cleanup
+
+        // Cleanup GIF after animation
+        setTimeout(() => cleanupMedia(gif), 1500);
 
     } catch (error) {
         console.error('Click handler error:', error);
-        cleanupMedia(video, audio);
+        cleanupMedia(gif);
     } finally {
         setTimeout(() => {
-            videoButton.classList.remove('clicked');
-            isProcessing = false;
+            gifButton.classList.remove('clicked');
         }, 150);
     }
 });
 
 // Mobile touch handling
 if (isMobileDevice()) {
-    videoButton.addEventListener('touchstart', () => {
+    gifButton.addEventListener('touchstart', () => {
         userHasInteracted = true;
     }, {passive: true});
 
     // Prevent double-tap zoom on iOS
-    videoButton.addEventListener('touchend', (event) => {
+    gifButton.addEventListener('touchend', (event) => {
         event.preventDefault();
     }, {passive: false});
 }
@@ -280,13 +192,13 @@ if (isMobileDevice()) {
 // Page visibility handling
 document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
-        // Pause all media when page is hidden
-        const allMedia = [...document.querySelectorAll('.video-overlay'), ...document.querySelectorAll('audio')];
-        allMedia.forEach(media => {
+        // Pause all audio when page is hidden
+        const allAudio = [...document.querySelectorAll('audio')];
+        allAudio.forEach(audio => {
             try {
-                if (!media.paused) media.pause();
+                if (!audio.paused) audio.pause();
             } catch (error) {
-                console.warn('Error pausing media:', error);
+                console.warn('Error pausing audio:', error);
             }
         });
     }
@@ -294,14 +206,12 @@ document.addEventListener('visibilitychange', () => {
 
 // Cleanup on page unload
 window.addEventListener('beforeunload', () => {
-    const allMedia = [...document.querySelectorAll('.video-overlay'), ...document.querySelectorAll('audio')];
-    allMedia.forEach(media => {
+    const allAudio = [...document.querySelectorAll('audio')];
+    allAudio.forEach(audio => {
         try {
-            media.pause();
-            if (isIOSSafari() && media.src) {
-                media.src = '';
-                if (media.load) media.load();
-            }
+            audio.pause();
+            audio.currentTime = 0;
+            if (audio.parentNode) audio.remove();
         } catch (error) {
             console.warn('Unload cleanup error:', error);
         }

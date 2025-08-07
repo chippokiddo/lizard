@@ -2,8 +2,6 @@
 
 A simple interactive button inspired by the end credits scene from the movie Elio.
 
-Click the button to play the lizard video!
-
 ## Try it out
 
 Go to https://chippokiddo.github.io/fairylights/ and enjoy clicking! 🦎✨
