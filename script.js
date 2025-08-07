@@ -1,8 +1,14 @@
 const videoButton = document.getElementById('videoButton');
-const videoElement = document.getElementById('videoElement');
 const clickCounter = document.getElementById('clickCounter');
 
 let clickCount = 0;
+let isProcessing = false; // Prevent rapid clicking issues
+
+// Preload video
+const preloadedVideo = document.createElement('video');
+preloadedVideo.src = 'assets/lizard.mp4';
+preloadedVideo.preload = 'auto';
+preloadedVideo.muted = true;
 
 // Create ripple effect
 function createRipple(event) {
@@ -21,99 +27,158 @@ function createRipple(event) {
 
     button.appendChild(ripple);
 
-    setTimeout(() => {
-        ripple.remove();
-    }, 600);
+    // Use requestAnimationFrame
+    requestAnimationFrame(() => {
+        setTimeout(() => {
+            if (ripple.parentNode) {
+                ripple.remove();
+            }
+        }, 600);
+    });
 }
 
-// Main click handler
-videoButton.addEventListener('click', function (event) {
-    // Prevent default behavior
-    event.preventDefault();
-    event.stopPropagation();
-
-    // Visual feedback
-    createRipple(event);
-    videoButton.classList.add('clicked');
-
-    // Update counter
-    clickCount++;
-    clickCounter.textContent = `Clicks: ${clickCount}`;
-
-    // Create visual video overlay
+// Create visual video overlay
+function createVisualVideo() {
     const visualVideo = document.createElement('video');
-    visualVideo.src = 'lizard.mp4';
+    visualVideo.src = 'assets/lizard.mp4';
     visualVideo.className = 'video-overlay';
     visualVideo.muted = true;
     visualVideo.currentTime = 0;
     visualVideo.preload = 'auto';
 
-    // Add to button
-    videoButton.appendChild(visualVideo);
+    return visualVideo;
+}
 
-    // Play the visual video
-    visualVideo.play().then(() => {
-        console.log(`Visual video ${clickCount} started`);
-    }).catch(e => console.log('Visual video play failed:', e));
-
-    // Remove visual video when it ends
-    visualVideo.addEventListener('ended', function () {
-        console.log(`Visual video ${clickCount} ended`);
-        visualVideo.remove();
-    });
-
-    // Create a completely new video element for audio playback
+// Create audio-only video element
+function createAudioVideo(clickId) {
     const audioVideo = document.createElement('video');
-    audioVideo.src = 'lizard.mp4'; // Set source directly
-    audioVideo.style.display = 'none';
-    audioVideo.style.position = 'absolute';
-    audioVideo.style.top = '-9999px';
+    audioVideo.src = 'assets/lizard.mp4';
+    audioVideo.style.cssText = 'display: none; position: absolute; top: -9999px; left: -9999px;';
     audioVideo.muted = false;
     audioVideo.volume = 0.7;
     audioVideo.preload = 'auto';
+    audioVideo.setAttribute('data-click-id', clickId);
 
-    // Add unique ID for tracking
-    audioVideo.setAttribute('data-click-id', clickCount);
+    return audioVideo;
+}
 
-    document.body.appendChild(audioVideo);
+// Handle video playback
+async function playVideoWithRetry(video, maxRetries = 3) {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            await video.play();
+            return true;
+        } catch (error) {
+            console.log(`Play attempt ${attempt} failed:`, error.message);
 
-    // Play the video with audio
-    const playPromise = audioVideo.play();
-
-    if (playPromise !== undefined) {
-        playPromise.then(() => {
-            console.log(`Audio playing for click ${clickCount}`);
-        }).catch((error) => {
-            console.log(`Audio play failed for click ${clickCount}:`, error);
-            setTimeout(() => {
-                audioVideo.play().catch(e => console.log('Retry failed:', e));
-            }, 100);
-        });
+            if (attempt < maxRetries) {
+                // Wait before retrying
+                await new Promise(resolve => setTimeout(resolve, 100 * attempt));
+            }
+        }
     }
+    return false;
+}
 
-    // Clean up when video ends
-    audioVideo.addEventListener('ended', function () {
-        console.log(`Video ended for click ${audioVideo.getAttribute('data-click-id')}`);
-        audioVideo.remove();
-    });
+// Clean up function for video elements
+function cleanupVideo(video, type, clickId) {
+    console.log(`${type} cleanup for click ${clickId}`);
+    if (video.parentNode) {
+        video.remove();
+    }
+}
 
-    // Also clean up on error
-    audioVideo.addEventListener('error', function () {
-        console.log(`Video error for click ${audioVideo.getAttribute('data-click-id')}`);
-        audioVideo.remove();
-    });
+// Main click handler
+videoButton.addEventListener('click', async function (event) {
+    // Prevent rapid clicking
+    if (isProcessing) return;
+    isProcessing = true;
 
-    // Remove visual feedback after short time
-    setTimeout(() => {
-        videoButton.classList.remove('clicked');
-    }, 200);
+    // Prevent default behavior
+    event.preventDefault();
+    event.stopPropagation();
+
+    // Update counter immediately
+    clickCount++;
+    clickCounter.textContent = `Clicks: ${clickCount}`;
+
+    const currentClickId = clickCount;
+
+    try {
+        // Visual feedback
+        createRipple(event);
+        videoButton.classList.add('clicked');
+
+        // Create and setup visual video
+        const visualVideo = createVisualVideo();
+        videoButton.appendChild(visualVideo);
+
+        // Create and setup audio video
+        const audioVideo = createAudioVideo(currentClickId);
+        document.body.appendChild(audioVideo);
+
+        // Setup event listeners for cleanup
+        const visualCleanup = () => cleanupVideo(visualVideo, 'Visual video', currentClickId);
+        const audioCleanup = () => cleanupVideo(audioVideo, 'Audio video', currentClickId);
+
+        visualVideo.addEventListener('ended', visualCleanup, {once: true});
+        visualVideo.addEventListener('error', visualCleanup, {once: true});
+
+        audioVideo.addEventListener('ended', audioCleanup, {once: true});
+        audioVideo.addEventListener('error', audioCleanup, {once: true});
+
+        // Start playback
+        const [visualSuccess, audioSuccess] = await Promise.allSettled([
+            playVideoWithRetry(visualVideo),
+            playVideoWithRetry(audioVideo)
+        ]);
+
+        if (visualSuccess.status === 'fulfilled' && visualSuccess.value) {
+            console.log(`Visual video ${currentClickId} started successfully`);
+        }
+
+        if (audioSuccess.status === 'fulfilled' && audioSuccess.value) {
+            console.log(`Audio video ${currentClickId} started successfully`);
+        }
+
+        // Emergency cleanup after reasonable time in case ended event doesn't fire
+        setTimeout(() => {
+            if (visualVideo.parentNode) {
+                console.log(`Emergency cleanup for visual video ${currentClickId}`);
+                visualVideo.remove();
+            }
+            if (audioVideo.parentNode) {
+                console.log(`Emergency cleanup for audio video ${currentClickId}`);
+                audioVideo.remove();
+            }
+        }, 30000); // 30 seconds max
+
+    } catch (error) {
+        console.error('Error in click handler:', error);
+    } finally {
+        // Remove visual feedback and allow next click
+        setTimeout(() => {
+            videoButton.classList.remove('clicked');
+            isProcessing = false;
+        }, 200);
+    }
 });
 
-// Only play the visual video on click, not continuously
-let visualVideoPlaying = false;
+// Pause video when page is hidden
+document.addEventListener('visibilitychange', function () {
+    if (document.hidden) {
+        // Pause all active videos when page becomes hidden
+        const activeVideos = document.querySelectorAll('video[data-click-id]');
+        activeVideos.forEach(video => {
+            if (!video.paused) {
+                video.pause();
+            }
+        });
+    }
+});
 
-// Reset visual video when it ends
-videoElement.addEventListener('ended', function () {
-    visualVideoPlaying = false;
-    videoElement.currentTime = 0;
+// Handle memory cleanup on page unload
+window.addEventListener('beforeunload', function () {
+    const activeVideos = document.querySelectorAll('video[data-click-id], .video-overlay');
+    activeVideos.forEach(video => video.remove());
 });
