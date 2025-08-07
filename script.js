@@ -3,28 +3,86 @@ const gifButton = document.getElementById('gifButton');
 const clickCounter = document.getElementById('clickCounter');
 let clickCount = 0;
 let userHasInteracted = false;
+let audioContext = null;
+let audioBuffer = null;
 
 // Device detection
 const isIOSDevice = () => /iPhone|iPad|iPod/i.test(navigator.userAgent);
 const isMobileDevice = () => /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || ('ontouchstart' in window);
 
 // Create and play audio
-function playAudio() {
+async function initializeAudio() {
     if (!userHasInteracted) return;
 
-    const audio = new Audio('assets/lizard.m4a');
-    audio.volume = 0.7;
-    audio.style.cssText = 'position:fixed!important;top:-9999px!important;opacity:0!important;pointer-events:none!important;';
+    try {
+        // Create audio context if not exists
+        if (!audioContext) {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        }
 
-    document.body.appendChild(audio);
+        // Resume context if suspended
+        if (audioContext.state === 'suspended') {
+            await audioContext.resume();
+        }
 
-    // Auto-cleanup when finished
-    audio.addEventListener('ended', () => audio.remove(), {once: true});
+        // Load audio buffer if not loaded
+        if (!audioBuffer) {
+            const response = await fetch('assets/lizard.m4a');
+            const arrayBuffer = await response.arrayBuffer();
+            audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+        }
+    } catch (err) {
+        console.warn('Audio initialization failed:', err);
+        // Fallback to regular audio element
+        audioContext = null;
+        audioBuffer = null;
+    }
+}
 
-    audio.play().catch(err => {
-        console.warn('Audio failed:', err);
-        audio.remove();
-    });
+// Play audio
+async function playAudio() {
+    if (!userHasInteracted) return;
+
+    try {
+        // Try Web Audio API first
+        if (audioContext && audioBuffer) {
+            const source = audioContext.createBufferSource();
+            const gainNode = audioContext.createGain();
+
+            source.buffer = audioBuffer;
+            gainNode.gain.value = 0.7;
+
+            source.connect(gainNode);
+            gainNode.connect(audioContext.destination);
+
+            source.start(0);
+        } else {
+            // Fallback to audio element
+            const audio = new Audio('assets/lizard.m4a');
+            audio.volume = 0.7;
+            audio.preload = 'auto';
+
+            // Play immediately in the user gesture
+            await audio.play();
+
+            // Cleanup
+            audio.addEventListener('ended', () => {
+                audio.remove();
+            }, {once: true});
+        }
+    } catch (err) {
+        console.warn('Audio playback failed:', err);
+
+        // try creating and playing audio immediately
+        try {
+            const audio = new Audio('assets/lizard.m4a');
+            audio.volume = 0.7;
+            await audio.play();
+            setTimeout(() => audio.remove(), 3000);
+        } catch (fallbackErr) {
+            console.warn('All audio playback methods failed:', fallbackErr);
+        }
+    }
 }
 
 // Create and animate GIF
@@ -58,24 +116,43 @@ function createRipple(event) {
     const ripple = document.createElement('span');
     const size = Math.max(rect.width, rect.height);
 
+    // Handle both mouse and touch events
+    let clientX, clientY;
+    if (event.touches && event.touches.length > 0) {
+        clientX = event.touches[0].clientX;
+        clientY = event.touches[0].clientY;
+    } else if (event.changedTouches && event.changedTouches.length > 0) {
+        clientX = event.changedTouches[0].clientX;
+        clientY = event.changedTouches[0].clientY;
+    } else {
+        clientX = event.clientX;
+        clientY = event.clientY;
+    }
+
     ripple.className = 'click-ripple';
     ripple.style.cssText = `
         width:${size}px;
         height:${size}px;
-        left:${event.clientX - rect.left - size / 2}px;
-        top:${event.clientY - rect.top - size / 2}px;
+        left:${clientX - rect.left - size / 2}px;
+        top:${clientY - rect.top - size / 2}px;
     `;
 
     gifButton.appendChild(ripple);
     setTimeout(() => ripple.remove(), 600);
 }
 
-// Main click handler
-gifButton.addEventListener('click', function (event) {
+// Main interaction handler
+async function handleInteraction(event) {
     event.preventDefault();
     event.stopPropagation();
 
+    // Mark user interaction
     userHasInteracted = true;
+
+    // Initialize audio on first interaction
+    if (!audioContext && !audioBuffer) {
+        await initializeAudio();
+    }
 
     // Update UI
     clickCount++;
@@ -84,28 +161,78 @@ gifButton.addEventListener('click', function (event) {
     gifButton.classList.add('clicked');
 
     // Play media
-    playAudio();
+    // must be synchronous with user gesture
+    await playAudio();
     playGif();
 
     // Remove clicked animation
     setTimeout(() => gifButton.classList.remove('clicked'), 150);
-});
+}
 
-// Mobile handling
+// Event listeners for both desktop and mobile
+gifButton.addEventListener('click', handleInteraction);
+
 if (isMobileDevice()) {
-    // Initialize on first touch
-    gifButton.addEventListener('touchstart', () => {
+    let touchStartTime = 0;
+    let hasTouchMoved = false;
+
+    gifButton.addEventListener('touchstart', (e) => {
+        touchStartTime = Date.now();
+        hasTouchMoved = false;
         userHasInteracted = true;
     }, {passive: true});
 
-    // Prevent zoom on iOS
-    gifButton.addEventListener('touchend', e => e.preventDefault(), {passive: false});
+    gifButton.addEventListener('touchmove', () => {
+        hasTouchMoved = true;
+    }, {passive: true});
+
+    gifButton.addEventListener('touchend', async (e) => {
+        e.preventDefault();
+
+        // Only trigger if it was a quick tap
+        const touchDuration = Date.now() - touchStartTime;
+        if (touchDuration < 500 && !hasTouchMoved) {
+            await handleInteraction(e);
+        }
+    }, {passive: false});
 }
 
+if (isIOSDevice()) {
+    // Handle iOS audio context suspension
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible' && audioContext && audioContext.state === 'suspended') {
+            audioContext.resume();
+        }
+    });
+}
+
+// Preload audio on first user interaction
+document.addEventListener('touchstart', async () => {
+    if (!userHasInteracted) {
+        userHasInteracted = true;
+        await initializeAudio();
+    }
+}, {once: true, passive: true});
+
+document.addEventListener('click', async () => {
+    if (!userHasInteracted) {
+        userHasInteracted = true;
+        await initializeAudio();
+    }
+}, {once: true});
+
 // Cleanup on page hide/unload
-['visibilitychange', 'beforeunload'].forEach(event => {
+['visibilitychange', 'beforeunload', 'pagehide'].forEach(event => {
     document.addEventListener(event, () => {
-        if (document.hidden || event === 'beforeunload') {
+        if (document.hidden || event === 'beforeunload' || event === 'pagehide') {
+            // Clean up audio context
+            if (audioContext) {
+                audioContext.close();
+                audioContext = null;
+                audioBuffer = null;
+            }
+
+            // Clean up any remaining audio elements
             document.querySelectorAll('audio').forEach(audio => {
                 audio.pause();
                 audio.remove();
@@ -114,4 +241,4 @@ if (isMobileDevice()) {
     });
 });
 
-console.log('Lizard button loaded successfully');
+console.log('Lizard button loaded successfully with mobile fixes');
