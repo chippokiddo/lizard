@@ -7,15 +7,27 @@ let clickCount = 0;
 let userHasInteracted = false;
 
 // Device detection utilities
+const isIOSDevice = () => {
+    return /iPhone|iPad|iPod/i.test(navigator.userAgent);
+};
+
 const isMobileDevice = () => {
     return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || ('ontouchstart' in window);
 };
 
 // Create new audio element for each click
 function createAudio() {
-    const audio = new Audio('assets/lizard.m4a');
+    const audio = new Audio();
+
+    audio.src = 'assets/lizard.m4a';
     audio.volume = 0.7;
-    audio.preload = 'auto';
+
+    if (isIOSDevice()) {
+        audio.preload = 'auto';
+        audio.load();
+    } else {
+        audio.preload = 'auto';
+    }
 
     // Hide audio element
     audio.style.cssText = `
@@ -57,7 +69,33 @@ async function playAudio() {
             if (audioElement.parentNode) {
                 audioElement.remove();
             }
-        }, { once: true });
+        }, {once: true});
+
+        if (isIOSDevice()) {
+            // Wait for audio to be ready on iOS
+            if (audioElement.readyState < 3) {
+                await new Promise((resolve, reject) => {
+                    const timeout = setTimeout(() => reject(new Error('Audio load timeout')), 2000);
+
+                    const onReady = () => {
+                        clearTimeout(timeout);
+                        audioElement.removeEventListener('canplaythrough', onReady);
+                        audioElement.removeEventListener('error', onError);
+                        resolve();
+                    };
+
+                    const onError = (e) => {
+                        clearTimeout(timeout);
+                        audioElement.removeEventListener('canplaythrough', onReady);
+                        audioElement.removeEventListener('error', onError);
+                        reject(e);
+                    };
+
+                    audioElement.addEventListener('canplaythrough', onReady);
+                    audioElement.addEventListener('error', onError);
+                });
+            }
+        }
 
         audioElement.currentTime = 0;
         await audioElement.play();
@@ -83,6 +121,7 @@ function playGif(gifElement) {
 
         // Stop the GIF after one loop
         setTimeout(() => {
+            // Replace with static first frame or hide
             gifElement.style.opacity = '0';
         }, 1000); // Match 1-second audio duration
 
@@ -136,9 +175,7 @@ function cleanupMedia(gif) {
 }
 
 // Main click handler
-gifButton.addEventListener('click', async function (event) {
-    // Remove isProcessing check to allow rapid clicking
-
+gifButton.addEventListener('click', function (event) {
     event.preventDefault();
     event.stopPropagation();
 
@@ -157,12 +194,28 @@ gifButton.addEventListener('click', async function (event) {
         gif = createGifElement();
         gifButton.appendChild(gif);
 
-        // Start playback
-        // both can happen independently
-        const audioPromise = playAudio();
-        const gifPlaying = playGif(gif);
+        // Play audio immediately and synchronously for iOS
+        const audioElement = createAudio();
+        audioElement.currentTime = 0;
 
-        audioPromise; // Audio will play and auto-cleanup
+        // Auto-cleanup when audio ends
+        audioElement.addEventListener('ended', () => {
+            if (audioElement.parentNode) {
+                audioElement.remove();
+            }
+        }, {once: true});
+
+        // Play audio synchronously
+        audioElement.play().catch(err => {
+            console.warn('Audio play failed:', err);
+            // Clean up failed audio
+            if (audioElement.parentNode) {
+                audioElement.remove();
+            }
+        });
+
+        // Play GIF
+        playGif(gif);
 
         // Cleanup GIF after animation
         setTimeout(() => cleanupMedia(gif), 1500);
@@ -181,6 +234,18 @@ gifButton.addEventListener('click', async function (event) {
 if (isMobileDevice()) {
     gifButton.addEventListener('touchstart', () => {
         userHasInteracted = true;
+
+        // Pre-initialize audio context on iOS
+        if (isIOSDevice()) {
+            try {
+                const testAudio = new Audio();
+                testAudio.src = 'data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhDjiZz/LB';
+                testAudio.play().catch(() => {
+                });
+            } catch (e) {
+                console.log('Audio pre-init failed:', e);
+            }
+        }
     }, {passive: true});
 
     // Prevent double-tap zoom on iOS
