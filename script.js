@@ -1,12 +1,13 @@
+// DOM elements
 const videoButton = document.getElementById('videoButton');
 const clickCounter = document.getElementById('clickCounter');
 
+// State variables
 let clickCount = 0;
 let isProcessing = false;
 let userHasInteracted = false;
-let videoPool = []; // Pool for reusing video elements on iOS
 
-// Device detection
+// Device detection utilities
 const isIOSSafari = () => {
     const ua = navigator.userAgent;
     return /iPhone|iPad|iPod/i.test(ua) && /Safari/i.test(ua) && !/CriOS|FxiOS|EdgiOS/i.test(ua);
@@ -16,130 +17,146 @@ const isMobileDevice = () => {
     return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || ('ontouchstart' in window);
 };
 
-// Create optimized video element for iOS
-function createVideoElement(options = {}) {
+// Media element creators
+function createVisualVideo() {
     const video = document.createElement('video');
-    video.src = 'assets/lizard.mp4';
-    video.muted = options.muted !== false;
-    video.playsInline = true;
-    video.preload = 'metadata';
-    video.controls = false;
-    video.disablePictureInPicture = true;
-    video.crossOrigin = 'anonymous';
 
-    // Essential iOS attributes
-    video.setAttribute('playsinline', '');
-    video.setAttribute('webkit-playsinline', '');
-    video.setAttribute('x5-playsinline', '');
-    video.setAttribute('disableremoteplayback', '');
+    // Configure video attributes
+    Object.assign(video, {
+        muted: true,
+        playsInline: true,
+        controls: false,
+        disablePictureInPicture: true,
+        src: 'assets/lizard.mp4',
+        className: 'video-overlay',
+        preload: isIOSSafari() ? 'auto' : 'metadata'
+    });
 
-    // Hide media controls completely
-    video.style.cssText += '-webkit-media-controls: none !important;';
-
-    if (options.isAudio) {
-        video.style.cssText = `
-            position: absolute; 
-            top: -9999px; 
-            left: -9999px; 
-            width: 1px; 
-            height: 1px; 
-            opacity: 0; 
-            pointer-events: none;
-            z-index: -1;
-        `;
-        video.volume = 0.7;
-        video.muted = false;
-    } else {
-        video.className = 'video-overlay';
-        video.style.cssText += `
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            pointer-events: none;
-            z-index: 1;
-        `;
-    }
+    // Set required attributes for iOS
+    video.setAttribute('playsinline', 'true');
+    video.setAttribute('webkit-playsinline', 'true');
 
     return video;
 }
 
-// Handle video playback
-async function playVideo(video, isAudioTrack = false) {
+function createAudioElement() {
+    const audio = new Audio('assets/lizard.m4a');
+    audio.volume = 0.7;
+    audio.preload = 'auto';
+
+    // Hide audio element
+    audio.style.cssText = `
+        position: fixed !important;
+        top: -9999px !important;
+        opacity: 0 !important;
+        pointer-events: none !important;
+    `;
+
+    return audio;
+}
+
+// Media playback functions
+async function playVideo(video) {
     try {
-        // Reset video state
         video.currentTime = 0;
 
-        // Make sure video is loaded before attempting play for iOS
-        if (isIOSSafari()) {
-            if (video.readyState < 2) {
-                await new Promise((resolve, reject) => {
-                    const timeout = setTimeout(() => reject(new Error('Load timeout')), 2000);
-
-                    const onLoaded = () => {
-                        clearTimeout(timeout);
-                        video.removeEventListener('loadeddata', onLoaded);
-                        video.removeEventListener('error', onError);
-                        resolve();
-                    };
-
-                    const onError = (e) => {
-                        clearTimeout(timeout);
-                        video.removeEventListener('loadeddata', onLoaded);
-                        video.removeEventListener('error', onError);
-                        reject(e);
-                    };
-
-                    video.addEventListener('loadeddata', onLoaded, {once: true});
-                    video.addEventListener('error', onError, {once: true});
-
-                    video.load();
-                });
-            }
+        // Wait for video to be ready on iOS
+        if (isIOSSafari() && video.readyState < 3) {
+            await waitForVideoReady(video);
         }
 
-        // Attempt to play
-        const playPromise = video.play();
-        if (playPromise) {
-            await playPromise;
-            return true;
-        }
-
+        await video.play();
+        console.log('Video playing successfully');
+        return true;
     } catch (error) {
-        console.warn(`Video play failed (${isAudioTrack ? 'audio' : 'visual'}):`, error.message);
-
-        // On iOS, if autoplay fails due to policy, that's expected for audio
-        if (isIOSSafari() && isAudioTrack && error.name === 'NotAllowedError') {
-            console.log('iOS blocked audio autoplay (expected behavior)');
-        }
-
+        console.error('Video play failed:', error.message);
         return false;
     }
 }
 
-// Clean video element
-function cleanupVideo(video) {
+async function playAudio(audio) {
     try {
-        if (video && video.parentNode) {
-            video.pause();
-            video.currentTime = 0;
-
-            // For iOS memory management
-            if (isIOSSafari()) {
-                video.src = '';
-                video.load();
-            }
-
-            video.remove();
+        if (!userHasInteracted) {
+            console.log('Skipping audio - no user interaction yet');
+            return false;
         }
+
+        audio.currentTime = 0;
+
+        // Wait for audio to load if needed
+        if (audio.readyState < 3) {
+            await waitForAudioReady(audio);
+        }
+
+        await audio.play();
+        console.log('Audio playing successfully');
+        return true;
     } catch (error) {
-        console.warn('Video cleanup error:', error);
+        console.warn('Audio play failed:', error.message);
+        return false;
     }
 }
 
-// Ripple effect
+// Helper functions for media loading
+function waitForVideoReady(video) {
+    return new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error('Video load timeout')), 2000);
+
+        const cleanup = () => {
+            clearTimeout(timeout);
+            video.removeEventListener('canplaythrough', onReady);
+            video.removeEventListener('error', onError);
+        };
+
+        const onReady = () => {
+            cleanup();
+            resolve();
+        };
+
+        const onError = (e) => {
+            cleanup();
+            reject(e);
+        };
+
+        video.addEventListener('canplaythrough', onReady);
+        video.addEventListener('error', onError);
+
+        if (video.networkState === 3) {
+            video.load();
+        }
+    });
+}
+
+function waitForAudioReady(audio) {
+    return new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error('Audio load timeout')), 2000);
+
+        const cleanup = () => {
+            clearTimeout(timeout);
+            audio.removeEventListener('canplaythrough', onReady);
+            audio.removeEventListener('error', onError);
+        };
+
+        const onReady = () => {
+            cleanup();
+            resolve();
+        };
+
+        const onError = (e) => {
+            cleanup();
+            reject(e);
+        };
+
+        audio.addEventListener('canplaythrough', onReady);
+        audio.addEventListener('error', onError);
+
+        if (audio.networkState === 3) {
+            audio.load();
+        }
+    });
+}
+
+// UI effects
 function createRipple(event) {
     const button = event.currentTarget;
     const rect = button.getBoundingClientRect();
@@ -149,22 +166,42 @@ function createRipple(event) {
     const x = event.clientX - rect.left - size / 2;
     const y = event.clientY - rect.top - size / 2;
 
-    ripple.className = 'click-ripple';
-    ripple.style.width = ripple.style.height = size + 'px';
-    ripple.style.left = x + 'px';
-    ripple.style.top = y + 'px';
+    Object.assign(ripple, {
+        className: 'click-ripple'
+    });
+
+    Object.assign(ripple.style, {
+        width: `${size}px`,
+        height: `${size}px`,
+        left: `${x}px`,
+        top: `${y}px`
+    });
 
     button.appendChild(ripple);
-
     setTimeout(() => ripple.remove(), 600);
 }
 
-// Mark user interaction for iOS autoplay policy
-function markUserInteraction() {
-    if (!userHasInteracted) {
-        userHasInteracted = true;
-        console.log('User interaction registered');
-    }
+// Cleanup function
+function cleanupMedia(video, audio) {
+    const elements = [video, audio].filter(Boolean);
+
+    elements.forEach(element => {
+        try {
+            element.pause();
+            element.currentTime = 0;
+
+            if (isIOSSafari()) {
+                element.src = '';
+                if (element.load) element.load();
+            }
+
+            if (element.parentNode) {
+                element.remove();
+            }
+        } catch (error) {
+            console.warn('Cleanup error:', error.message);
+        }
+    });
 }
 
 // Main click handler
@@ -175,53 +212,51 @@ videoButton.addEventListener('click', async function (event) {
     event.stopPropagation();
 
     isProcessing = true;
-    markUserInteraction();
+    userHasInteracted = true;
 
-    // Update counter
+    // Update counter and add visual feedback
     clickCount++;
     clickCounter.textContent = `Clicks: ${clickCount}`;
+    createRipple(event);
+    videoButton.classList.add('clicked');
+
+    let video, audio;
 
     try {
-        // Visual feedback
-        createRipple(event);
-        videoButton.classList.add('clicked');
+        // Create media elements
+        video = createVisualVideo();
+        audio = createAudioElement();
 
-        // Create visual video
-        const visualVideo = createVideoElement({muted: true});
-        videoButton.appendChild(visualVideo);
+        videoButton.appendChild(video);
+        document.body.appendChild(audio);
 
-        // Create audio video (only if user has interacted and not muted)
-        let audioVideo = null;
-        if (userHasInteracted) {
-            audioVideo = createVideoElement({
-                muted: false,
-                isAudio: true
-            });
-            document.body.appendChild(audioVideo);
-        }
-
-        // Set up cleanup on video end
-        const cleanup = () => {
-            cleanupVideo(visualVideo);
-            if (audioVideo) cleanupVideo(audioVideo);
+        // Set up cleanup when both media end
+        let mediaEndedCount = 0;
+        const onMediaEnd = () => {
+            mediaEndedCount++;
+            if (mediaEndedCount >= 2) {
+                cleanupMedia(video, audio);
+            }
         };
 
-        visualVideo.addEventListener('ended', cleanup, {once: true});
-        if (audioVideo) {
-            audioVideo.addEventListener('ended', cleanup, {once: true});
-        }
+        video.addEventListener('ended', onMediaEnd, {once: true});
+        audio.addEventListener('ended', onMediaEnd, {once: true});
 
-        // Play videos
-        const visualPromise = playVideo(visualVideo, false);
-        const audioPromise = audioVideo ? playVideo(audioVideo, true) : Promise.resolve();
+        // Handle errors
+        video.addEventListener('error', () => cleanupMedia(video, audio), {once: true});
 
-        await Promise.all([visualPromise, audioPromise]);
+        // Start playback
+        await Promise.allSettled([
+            playVideo(video),
+            playAudio(audio)
+        ]);
 
         // Emergency cleanup after 10 seconds
-        setTimeout(cleanup, 10000);
+        setTimeout(() => cleanupMedia(video, audio), 10000);
 
     } catch (error) {
         console.error('Click handler error:', error);
+        cleanupMedia(video, audio);
     } finally {
         setTimeout(() => {
             videoButton.classList.remove('clicked');
@@ -230,47 +265,42 @@ videoButton.addEventListener('click', async function (event) {
     }
 });
 
-// Touch handling for mobile
+// Mobile touch handling
 if (isMobileDevice()) {
-    let touchStartTime = 0;
-
-    videoButton.addEventListener('touchstart', (event) => {
-        touchStartTime = Date.now();
-        markUserInteraction();
+    videoButton.addEventListener('touchstart', () => {
+        userHasInteracted = true;
     }, {passive: true});
 
+    // Prevent double-tap zoom on iOS
     videoButton.addEventListener('touchend', (event) => {
-        const touchDuration = Date.now() - touchStartTime;
-        if (touchDuration < 500) {
-            event.preventDefault();
-        }
+        event.preventDefault();
     }, {passive: false});
 }
 
-// Handle page visibility changes
+// Page visibility handling
 document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
-        // Pause all active videos when page becomes hidden
-        const activeVideos = document.querySelectorAll('.video-overlay, video');
-        activeVideos.forEach(video => {
+        // Pause all media when page is hidden
+        const allMedia = [...document.querySelectorAll('.video-overlay'), ...document.querySelectorAll('audio')];
+        allMedia.forEach(media => {
             try {
-                if (!video.paused) video.pause();
+                if (!media.paused) media.pause();
             } catch (error) {
-                console.warn('Error pausing video on visibility change:', error);
+                console.warn('Error pausing media:', error);
             }
         });
     }
 });
 
-// Handle cleanup on page unload
+// Cleanup on page unload
 window.addEventListener('beforeunload', () => {
-    const allVideos = document.querySelectorAll('video');
-    allVideos.forEach(video => {
+    const allMedia = [...document.querySelectorAll('.video-overlay'), ...document.querySelectorAll('audio')];
+    allMedia.forEach(media => {
         try {
-            video.pause();
-            if (isIOSSafari()) {
-                video.src = '';
-                video.load();
+            media.pause();
+            if (isIOSSafari() && media.src) {
+                media.src = '';
+                if (media.load) media.load();
             }
         } catch (error) {
             console.warn('Unload cleanup error:', error);
@@ -278,27 +308,4 @@ window.addEventListener('beforeunload', () => {
     });
 });
 
-// iOS event handlers
-if (isIOSSafari()) {
-    // Handle iOS app backgrounding
-    window.addEventListener('pagehide', () => {
-        document.querySelectorAll('video').forEach(video => {
-            try {
-                video.pause();
-            } catch (error) {
-                console.warn('Page hide cleanup error:', error);
-            }
-        });
-    }, {passive: true});
-
-    // Handle focus loss
-    window.addEventListener('blur', () => {
-        document.querySelectorAll('video').forEach(video => {
-            try {
-                if (!video.paused) video.pause();
-            } catch (error) {
-                console.warn('Blur cleanup error:', error);
-            }
-        });
-    }, {passive: true});
-}
+console.log('Lizard button script loaded successfully');
