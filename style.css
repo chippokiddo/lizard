@@ -8,6 +8,12 @@ body {
     margin: 0;
     overflow: hidden;
     background-color: #f5f5f5;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+    touch-action: manipulation;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -38,6 +44,13 @@ body {
     box-shadow: 0 8px 25px rgba(0, 0, 0, 0.2);
     background: #000;
     margin: 20px 0;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+    touch-action: manipulation;
 }
 
 .video-button:hover {
@@ -47,6 +60,19 @@ body {
 
 .video-button:active {
     transform: scale(0.98);
+}
+
+video {
+    -webkit-playsinline: true !important;
+    outline: none;
+    border: none;
+}
+
+video::-webkit-media-controls,
+video::-webkit-media-controls-panel,
+video::-webkit-media-controls-play-button,
+video::-webkit-media-controls-start-playback-button {
+    display: none !important;
 }
 
 .video-overlay {
@@ -66,6 +92,10 @@ body {
     margin: 20px 0;
     font-weight: bold;
     text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -101,5 +131,27 @@ body {
     }
     50% {
         transform: scale(1.08);
+    }
+}
+
+@media (max-width: 768px), (hover: none) {
+    .video-button {
+        width: 280px;
+        height: 180px;
+        transform: none;
+    }
+
+    .video-button:hover {
+        transform: none;
+        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.2);
+    }
+
+    .video-button:active {
+        transform: scale(0.95);
+        transition: transform 0.1s ease;
+    }
+
+    .counter {
+        font-size: 22px;
     }
 }
