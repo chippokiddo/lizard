@@ -9,6 +9,8 @@ const preloadedVideo = document.createElement('video');
 preloadedVideo.src = 'assets/lizard.mp4';
 preloadedVideo.preload = 'auto';
 preloadedVideo.muted = true;
+preloadedVideo.playsInline = true; // Critical for mobile
+preloadedVideo.setAttribute('playsinline', ''); // Backup attribute
 
 // Create ripple effect
 function createRipple(event) {
@@ -46,6 +48,17 @@ function createVisualVideo() {
     visualVideo.currentTime = 0;
     visualVideo.preload = 'auto';
 
+    // Critical mobile attributes
+    visualVideo.playsInline = true;
+    visualVideo.setAttribute('playsinline', '');
+    visualVideo.setAttribute('webkit-playsinline', '');
+    visualVideo.controls = false;
+    visualVideo.disablePictureInPicture = true;
+
+    // Additional mobile-specific properties
+    visualVideo.setAttribute('x-webkit-airplay', 'deny');
+    visualVideo.setAttribute('disableremoteplayback', '');
+
     return visualVideo;
 }
 
@@ -53,11 +66,18 @@ function createVisualVideo() {
 function createAudioVideo(clickId) {
     const audioVideo = document.createElement('video');
     audioVideo.src = 'assets/lizard.mp4';
-    audioVideo.style.cssText = 'display: none; position: absolute; top: -9999px; left: -9999px;';
+    audioVideo.style.cssText = 'display: none; position: absolute; top: -9999px; left: -9999px; width: 1px; height: 1px;';
     audioVideo.muted = false;
     audioVideo.volume = 0.7;
     audioVideo.preload = 'auto';
     audioVideo.setAttribute('data-click-id', clickId);
+
+    // Mobile-specific attributes for hidden audio video
+    audioVideo.playsInline = true;
+    audioVideo.setAttribute('playsinline', '');
+    audioVideo.setAttribute('webkit-playsinline', '');
+    audioVideo.controls = false;
+    audioVideo.disablePictureInPicture = true;
 
     return audioVideo;
 }
@@ -66,10 +86,30 @@ function createAudioVideo(clickId) {
 async function playVideoWithRetry(video, maxRetries = 3) {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
-            await video.play();
+            // Check video is ready for mobile
+            if (video.readyState < 2) {
+                await new Promise((resolve, reject) => {
+                    const timeout = setTimeout(() => reject(new Error('Video load timeout')), 3000);
+                    video.addEventListener('loadeddata', () => {
+                        clearTimeout(timeout);
+                        resolve();
+                    }, {once: true});
+                });
+            }
+
+            const playPromise = video.play();
+            if (playPromise !== undefined) {
+                await playPromise;
+            }
             return true;
         } catch (error) {
             console.log(`Play attempt ${attempt} failed:`, error.message);
+
+            // Handle specific mobile errors
+            if (error.name === 'NotAllowedError') {
+                console.log('Autoplay prevented by browser policy');
+                return false;
+            }
 
             if (attempt < maxRetries) {
                 // Wait before retrying
@@ -83,8 +123,38 @@ async function playVideoWithRetry(video, maxRetries = 3) {
 // Clean up function for video elements
 function cleanupVideo(video, type, clickId) {
     console.log(`${type} cleanup for click ${clickId}`);
-    if (video.parentNode) {
-        video.remove();
+    try {
+        if (!video.paused) {
+            video.pause();
+        }
+        video.currentTime = 0;
+        if (video.parentNode) {
+            video.remove();
+        }
+    } catch (error) {
+        console.log('Cleanup error:', error);
+    }
+}
+
+// Detect if on mobile
+function isMobileDevice() {
+    return /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+        ('ontouchstart' in window) ||
+        (navigator.maxTouchPoints > 0);
+}
+
+// Initialize audio context on first user interaction - required for mobile
+let audioContextInitialized = false;
+
+function initializeAudioContext() {
+    if (!audioContextInitialized && isMobileDevice()) {
+        // Create a silent audio context to unlock audio playback
+        const tempAudio = new Audio();
+        tempAudio.volume = 0;
+        tempAudio.muted = true;
+        tempAudio.play().catch(() => {
+        });
+        audioContextInitialized = true;
     }
 }
 
@@ -94,9 +164,12 @@ videoButton.addEventListener('click', async function (event) {
     if (isProcessing) return;
     isProcessing = true;
 
-    // Prevent default behavior
+    // Prevent default behavior and stop propagation
     event.preventDefault();
     event.stopPropagation();
+
+    // Initialize audio context on first click - mobile requirement
+    initializeAudioContext();
 
     // Update counter immediately
     clickCount++;
@@ -113,7 +186,7 @@ videoButton.addEventListener('click', async function (event) {
         const visualVideo = createVisualVideo();
         videoButton.appendChild(visualVideo);
 
-        // Create and setup audio video
+        // Create and setup audio video only if not mobile or user has interacted
         const audioVideo = createAudioVideo(currentClickId);
         document.body.appendChild(audioVideo);
 
@@ -128,28 +201,35 @@ videoButton.addEventListener('click', async function (event) {
         audioVideo.addEventListener('error', audioCleanup, {once: true});
 
         // Start playback
-        const [visualSuccess, audioSuccess] = await Promise.allSettled([
-            playVideoWithRetry(visualVideo),
-            playVideoWithRetry(audioVideo)
-        ]);
+        const playPromises = [];
 
-        if (visualSuccess.status === 'fulfilled' && visualSuccess.value) {
+        // Always try to play visual video
+        playPromises.push(playVideoWithRetry(visualVideo));
+
+        // Audio on mobile
+        if (!isMobileDevice() || audioContextInitialized) {
+            playPromises.push(playVideoWithRetry(audioVideo));
+        }
+
+        const results = await Promise.allSettled(playPromises);
+
+        if (results[0] && results[0].status === 'fulfilled' && results[0].value) {
             console.log(`Visual video ${currentClickId} started successfully`);
         }
 
-        if (audioSuccess.status === 'fulfilled' && audioSuccess.value) {
+        if (results[1] && results[1].status === 'fulfilled' && results[1].value) {
             console.log(`Audio video ${currentClickId} started successfully`);
         }
 
-        // Emergency cleanup after reasonable time in case ended event doesn't fire
+        // Emergency cleanup after reasonable time
         setTimeout(() => {
             if (visualVideo.parentNode) {
                 console.log(`Emergency cleanup for visual video ${currentClickId}`);
-                visualVideo.remove();
+                cleanupVideo(visualVideo, 'Emergency visual', currentClickId);
             }
             if (audioVideo.parentNode) {
                 console.log(`Emergency cleanup for audio video ${currentClickId}`);
-                audioVideo.remove();
+                cleanupVideo(audioVideo, 'Emergency audio', currentClickId);
             }
         }, 30000); // 30 seconds max
 
@@ -164,14 +244,30 @@ videoButton.addEventListener('click', async function (event) {
     }
 });
 
+// Handle touch events for mobile
+if (isMobileDevice()) {
+    videoButton.addEventListener('touchstart', function (event) {
+        event.preventDefault();
+    }, {passive: false});
+
+    videoButton.addEventListener('touchend', function (event) {
+        event.preventDefault();
+        // The click event will still fire
+    }, {passive: false});
+}
+
 // Pause video when page is hidden
 document.addEventListener('visibilitychange', function () {
     if (document.hidden) {
         // Pause all active videos when page becomes hidden
-        const activeVideos = document.querySelectorAll('video[data-click-id]');
+        const activeVideos = document.querySelectorAll('video[data-click-id], .video-overlay');
         activeVideos.forEach(video => {
-            if (!video.paused) {
-                video.pause();
+            try {
+                if (!video.paused) {
+                    video.pause();
+                }
+            } catch (error) {
+                console.log('Error pausing video:', error);
             }
         });
     }
@@ -180,5 +276,11 @@ document.addEventListener('visibilitychange', function () {
 // Handle memory cleanup on page unload
 window.addEventListener('beforeunload', function () {
     const activeVideos = document.querySelectorAll('video[data-click-id], .video-overlay');
-    activeVideos.forEach(video => video.remove());
+    activeVideos.forEach(video => {
+        try {
+            cleanupVideo(video, 'Page unload', 'unknown');
+        } catch (error) {
+            console.log('Error during page unload cleanup:', error);
+        }
+    });
 });
