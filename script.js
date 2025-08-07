@@ -2,15 +2,23 @@ const videoButton = document.getElementById('videoButton');
 const clickCounter = document.getElementById('clickCounter');
 
 let clickCount = 0;
-let isProcessing = false; // Prevent rapid clicking issues
+let isProcessing = false;
+let userHasInteracted = false; // Track user interaction for Safari iOS
 
-// Preload video
-const preloadedVideo = document.createElement('video');
-preloadedVideo.src = 'assets/lizard.mp4';
-preloadedVideo.preload = 'auto';
-preloadedVideo.muted = true;
-preloadedVideo.playsInline = true; // Critical for mobile
-preloadedVideo.setAttribute('playsinline', ''); // Backup attribute
+// Create a single preloaded video
+const masterVideo = document.createElement('video');
+masterVideo.src = 'assets/lizard.mp4';
+masterVideo.preload = 'none'; // Let iOS decide when to load
+masterVideo.muted = true;
+masterVideo.playsInline = true;
+masterVideo.setAttribute('playsinline', '');
+masterVideo.setAttribute('webkit-playsinline', '');
+masterVideo.setAttribute('x5-playsinline', ''); // Additional mobile attribute
+masterVideo.style.display = 'none';
+masterVideo.crossOrigin = 'anonymous'; // Help with iOS loading
+
+// Don't add to DOM immediately
+// Do it after first interaction
 
 // Create ripple effect
 function createRipple(event) {
@@ -29,14 +37,11 @@ function createRipple(event) {
 
     button.appendChild(ripple);
 
-    // Use requestAnimationFrame
-    requestAnimationFrame(() => {
-        setTimeout(() => {
-            if (ripple.parentNode) {
-                ripple.remove();
-            }
-        }, 600);
-    });
+    setTimeout(() => {
+        if (ripple.parentNode) {
+            ripple.remove();
+        }
+    }, 600);
 }
 
 // Create visual video overlay
@@ -46,132 +51,154 @@ function createVisualVideo() {
     visualVideo.className = 'video-overlay';
     visualVideo.muted = true;
     visualVideo.currentTime = 0;
-    visualVideo.preload = 'auto';
-
-    // Critical mobile attributes
+    visualVideo.preload = 'none';
+    visualVideo.style.display = 'block';
     visualVideo.playsInline = true;
     visualVideo.setAttribute('playsinline', '');
     visualVideo.setAttribute('webkit-playsinline', '');
+    visualVideo.setAttribute('x5-playsinline', '');
     visualVideo.controls = false;
     visualVideo.disablePictureInPicture = true;
-
-    // Additional mobile-specific properties
-    visualVideo.setAttribute('x-webkit-airplay', 'deny');
     visualVideo.setAttribute('disableremoteplayback', '');
+    visualVideo.crossOrigin = 'anonymous';
 
     return visualVideo;
 }
 
-// Create audio-only video element
+// Create audio video element
 function createAudioVideo(clickId) {
     const audioVideo = document.createElement('video');
     audioVideo.src = 'assets/lizard.mp4';
-    audioVideo.style.cssText = 'display: none; position: absolute; top: -9999px; left: -9999px; width: 1px; height: 1px;';
+    audioVideo.style.cssText = 'position: fixed; top: -1000px; left: -1000px; width: 1px; height: 1px; opacity: 0; z-index: -1;';
     audioVideo.muted = false;
     audioVideo.volume = 0.7;
-    audioVideo.preload = 'auto';
+    audioVideo.currentTime = 0;
+    audioVideo.preload = 'none';
     audioVideo.setAttribute('data-click-id', clickId);
-
-    // Mobile-specific attributes for hidden audio video
     audioVideo.playsInline = true;
     audioVideo.setAttribute('playsinline', '');
     audioVideo.setAttribute('webkit-playsinline', '');
+    audioVideo.setAttribute('x5-playsinline', '');
     audioVideo.controls = false;
     audioVideo.disablePictureInPicture = true;
+    audioVideo.crossOrigin = 'anonymous';
 
     return audioVideo;
 }
 
 // Handle video playback
-async function playVideoWithRetry(video, maxRetries = 3) {
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-        try {
-            // Check video is ready for mobile
-            if (video.readyState < 2) {
+async function playVideoWithRetry(video, isAudio = false) {
+    try {
+        if (isIOSSafari()) {
+            video.load();
+            if (video.readyState < 3) {
                 await new Promise((resolve, reject) => {
-                    const timeout = setTimeout(() => reject(new Error('Video load timeout')), 3000);
-                    video.addEventListener('loadeddata', () => {
+                    const timeout = setTimeout(() => {
+                        reject(new Error('Video load timeout'));
+                    }, 3000);
+
+                    const onCanPlay = () => {
                         clearTimeout(timeout);
+                        cleanup();
                         resolve();
-                    }, {once: true});
+                    };
+
+                    const onError = (e) => {
+                        clearTimeout(timeout);
+                        cleanup();
+                        reject(e);
+                    };
+
+                    const cleanup = () => {
+                        video.removeEventListener('canplaythrough', onCanPlay);
+                        video.removeEventListener('loadeddata', onCanPlay);
+                        video.removeEventListener('error', onError);
+                    };
+
+                    video.addEventListener('canplaythrough', onCanPlay);
+                    video.addEventListener('loadeddata', onCanPlay);
+                    video.addEventListener('error', onError);
                 });
             }
-
-            const playPromise = video.play();
-            if (playPromise !== undefined) {
-                await playPromise;
-            }
-            return true;
-        } catch (error) {
-            console.log(`Play attempt ${attempt} failed:`, error.message);
-
-            // Handle specific mobile errors
-            if (error.name === 'NotAllowedError') {
-                console.log('Autoplay prevented by browser policy');
-                return false;
-            }
-
-            if (attempt < maxRetries) {
-                // Wait before retrying
-                await new Promise(resolve => setTimeout(resolve, 100 * attempt));
-            }
         }
+
+        // Reset video position and play
+        video.currentTime = 0;
+
+        const playPromise = video.play();
+        if (playPromise) {
+            await playPromise;
+        }
+        return true;
+
+    } catch (error) {
+        console.log(`Play failed (${isAudio ? 'audio' : 'visual'}):`, error.message);
+
+        // Don't retry on iOS Safari
+        if (isIOSSafari() && (error.name === 'NotAllowedError' || error.name === 'NotSupportedError')) {
+            console.log('iOS Safari blocked playback');
+            return false;
+        }
+
+        return false;
     }
-    return false;
 }
 
-// Clean up function for video elements
+// Clean up function
 function cleanupVideo(video, type, clickId) {
-    console.log(`${type} cleanup for click ${clickId}`);
     try {
         if (!video.paused) {
             video.pause();
         }
         video.currentTime = 0;
+        video.src = '';
+        video.load(); // This helps with memory cleanup on iOS
         if (video.parentNode) {
             video.remove();
         }
     } catch (error) {
-        console.log('Cleanup error:', error);
+        console.log(`${type} cleanup error:`, error);
     }
 }
 
-// Detect if on mobile
+// Detect mobile
 function isMobileDevice() {
-    return /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
-        ('ontouchstart' in window) ||
-        (navigator.maxTouchPoints > 0);
+    return /iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+        /Android/i.test(navigator.userAgent) ||
+        ('ontouchstart' in window);
 }
 
-// Initialize audio context on first user interaction - required for mobile
-let audioContextInitialized = false;
+// Check if specifically iOS Safari
+function isIOSSafari() {
+    const ua = navigator.userAgent;
+    return /iPhone|iPad|iPod/i.test(ua) && /Safari/i.test(ua) && !/CriOS|FxiOS|EdgiOS/i.test(ua);
+}
 
-function initializeAudioContext() {
-    if (!audioContextInitialized && isMobileDevice()) {
-        // Create a silent audio context to unlock audio playback
-        const tempAudio = new Audio();
-        tempAudio.volume = 0;
-        tempAudio.muted = true;
-        tempAudio.play().catch(() => {
-        });
-        audioContextInitialized = true;
+// Initialize user interaction tracking
+function markUserInteraction() {
+    if (!userHasInteracted) {
+        userHasInteracted = true;
+        console.log('User interaction registered for Safari iOS');
+
+        // Add master video to DOM only after first interaction on iOS
+        if (isIOSSafari() && !document.body.contains(masterVideo)) {
+            document.body.appendChild(masterVideo);
+        }
     }
 }
 
 // Main click handler
 videoButton.addEventListener('click', async function (event) {
-    // Prevent rapid clicking
     if (isProcessing) return;
     isProcessing = true;
 
-    // Prevent default behavior and stop propagation
     event.preventDefault();
     event.stopPropagation();
 
-    // Initialize audio context on first click - mobile requirement
-    initializeAudioContext();
+    // Mark user interaction for Safari iOS
+    markUserInteraction();
 
-    // Update counter immediately
+    // Update counter
     clickCount++;
     clickCounter.textContent = `Clicks: ${clickCount}`;
 
@@ -182,84 +209,88 @@ videoButton.addEventListener('click', async function (event) {
         createRipple(event);
         videoButton.classList.add('clicked');
 
-        // Create and setup visual video
+        // Create visual video
         const visualVideo = createVisualVideo();
         videoButton.appendChild(visualVideo);
 
-        // Create and setup audio video only if not mobile or user has interacted
-        const audioVideo = createAudioVideo(currentClickId);
-        document.body.appendChild(audioVideo);
+        // Setup cleanup handlers
+        const visualCleanupHandler = () => {
+            cleanupVideo(visualVideo, 'Visual video', currentClickId);
+        };
 
-        // Setup event listeners for cleanup
-        const visualCleanup = () => cleanupVideo(visualVideo, 'Visual video', currentClickId);
-        const audioCleanup = () => cleanupVideo(audioVideo, 'Audio video', currentClickId);
+        visualVideo.addEventListener('ended', visualCleanupHandler, {once: true});
+        visualVideo.addEventListener('error', visualCleanupHandler, {once: true});
 
-        visualVideo.addEventListener('ended', visualCleanup, {once: true});
-        visualVideo.addEventListener('error', visualCleanup, {once: true});
+        // Create audio video only after user interaction
+        let audioVideo = null;
+        let audioCleanupHandler = null;
 
-        audioVideo.addEventListener('ended', audioCleanup, {once: true});
-        audioVideo.addEventListener('error', audioCleanup, {once: true});
+        if (userHasInteracted && !isIOSSafari()) {
+            // Only create audio video for non-iOS or after user interaction
+            audioVideo = createAudioVideo(currentClickId);
+            document.body.appendChild(audioVideo);
+
+            audioCleanupHandler = () => {
+                cleanupVideo(audioVideo, 'Audio video', currentClickId);
+            };
+
+            audioVideo.addEventListener('ended', audioCleanupHandler, {once: true});
+            audioVideo.addEventListener('error', audioCleanupHandler, {once: true});
+        }
 
         // Start playback
-        const playPromises = [];
+        const visualPlayPromise = playVideoWithRetry(visualVideo, false);
 
-        // Always try to play visual video
-        playPromises.push(playVideoWithRetry(visualVideo));
-
-        // Audio on mobile
-        if (!isMobileDevice() || audioContextInitialized) {
-            playPromises.push(playVideoWithRetry(audioVideo));
+        let audioPlayPromise = Promise.resolve(true);
+        if (audioVideo) {
+            audioPlayPromise = playVideoWithRetry(audioVideo, true);
         }
 
-        const results = await Promise.allSettled(playPromises);
+        // Wait for both to complete
+        await Promise.all([visualPlayPromise, audioPlayPromise]);
 
-        if (results[0] && results[0].status === 'fulfilled' && results[0].value) {
-            console.log(`Visual video ${currentClickId} started successfully`);
-        }
-
-        if (results[1] && results[1].status === 'fulfilled' && results[1].value) {
-            console.log(`Audio video ${currentClickId} started successfully`);
-        }
-
-        // Emergency cleanup after reasonable time
+        // Emergency cleanup
         setTimeout(() => {
             if (visualVideo.parentNode) {
-                console.log(`Emergency cleanup for visual video ${currentClickId}`);
                 cleanupVideo(visualVideo, 'Emergency visual', currentClickId);
             }
-            if (audioVideo.parentNode) {
-                console.log(`Emergency cleanup for audio video ${currentClickId}`);
+            if (audioVideo && audioVideo.parentNode) {
                 cleanupVideo(audioVideo, 'Emergency audio', currentClickId);
             }
-        }, 30000); // 30 seconds max
+        }, 15000);
 
     } catch (error) {
-        console.error('Error in click handler:', error);
+        console.error('Click handler error:', error);
     } finally {
-        // Remove visual feedback and allow next click
         setTimeout(() => {
             videoButton.classList.remove('clicked');
             isProcessing = false;
-        }, 200);
+        }, 150);
     }
 });
 
-// Handle touch events for mobile
+// Touch handling for iOS
 if (isMobileDevice()) {
+    let touchStartTime = 0;
+
     videoButton.addEventListener('touchstart', function (event) {
-        event.preventDefault();
-    }, {passive: false});
+        touchStartTime = Date.now();
+        markUserInteraction();
+    }, {passive: true});
 
     videoButton.addEventListener('touchend', function (event) {
-        event.preventDefault();
-        // The click event will still fire
+        const touchDuration = Date.now() - touchStartTime;
+
+        // Only trigger if it was a quick tap, not a drag
+        if (touchDuration < 500) {
+            event.preventDefault();
+        }
     }, {passive: false});
 }
 
-// Pause video when page is hidden
+// Handle visibility changes
 document.addEventListener('visibilitychange', function () {
     if (document.hidden) {
-        // Pause all active videos when page becomes hidden
         const activeVideos = document.querySelectorAll('video[data-click-id], .video-overlay');
         activeVideos.forEach(video => {
             try {
@@ -275,12 +306,43 @@ document.addEventListener('visibilitychange', function () {
 
 // Handle memory cleanup on page unload
 window.addEventListener('beforeunload', function () {
-    const activeVideos = document.querySelectorAll('video[data-click-id], .video-overlay');
-    activeVideos.forEach(video => {
+    const allVideos = document.querySelectorAll('video');
+    allVideos.forEach(video => {
         try {
-            cleanupVideo(video, 'Page unload', 'unknown');
+            video.pause();
+            video.src = '';
+            video.load();
         } catch (error) {
-            console.log('Error during page unload cleanup:', error);
+            console.log('Unload cleanup error:', error);
         }
     });
 });
+
+// Additional iOS event listeners
+if (isIOSSafari()) {
+    // Handle iOS app state changes
+    window.addEventListener('pagehide', function () {
+        const allVideos = document.querySelectorAll('video');
+        allVideos.forEach(video => {
+            try {
+                video.pause();
+            } catch (error) {
+                console.log('Page hide cleanup error:', error);
+            }
+        });
+    });
+
+    // Handle focus/blur for Safari iOS
+    window.addEventListener('blur', function () {
+        const activeVideos = document.querySelectorAll('.video-overlay, video[data-click-id]');
+        activeVideos.forEach(video => {
+            try {
+                if (!video.paused) {
+                    video.pause();
+                }
+            } catch (error) {
+                console.log('Blur cleanup error:', error);
+            }
+        });
+    });
+}
