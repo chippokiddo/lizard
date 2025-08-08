@@ -241,4 +241,4 @@ document.addEventListener('click', async () => {
     });
 });
 
-console.log('Lizard button loaded successfully with mobile fixes');
+console.log('Lizard button loaded successfully');
