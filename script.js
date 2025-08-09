@@ -5,7 +5,8 @@ let clickCount = 0;
 let userHasInteracted = false;
 let audioContext = null;
 let audioBuffer = null;
-let gifElement = null;
+let activeGifCount = 0;
+const MAX_CONCURRENT_GIFS = 8;
 
 // Device detection
 const isIOSDevice = () => /iPhone|iPad|iPod/i.test(navigator.userAgent);
@@ -88,29 +89,45 @@ async function playAudio() {
 
 // Create and animate GIF
 function playGif() {
-    // Create GIF element only once
-    if (!gifElement) {
-        gifElement = document.createElement('img');
-        gifElement.className = 'gif-overlay';
-        gifElement.alt = 'Lizard animation';
-        gifButton.appendChild(gifElement);
+    // Limit concurrent animations to prevent excessive DOM nodes
+    if (activeGifCount >= MAX_CONCURRENT_GIFS) {
+        return;
     }
 
-    // Reset opacity and restart GIF
-    gifElement.style.opacity = '0';
-    
-    // Force reload with timestamp to restart GIF animation
-    gifElement.src = `assets/lizard.gif?t=${Date.now()}`;
-    
-    gifElement.onload = () => {
-        gifElement.style.opacity = '1';
-        // Hide after 1 second
+    activeGifCount++;
+
+    const gif = document.createElement('img');
+    gif.className = 'gif-overlay';
+    gif.alt = 'Lizard animation';
+
+    // Improved cleanup function
+    const cleanup = () => {
+        activeGifCount--;
+        if (gif.parentNode) {
+            gif.remove();
+        }
+        // Clear any remaining references
+        gif.onload = null;
+        gif.onerror = null;
+    };
+
+    gif.onload = () => {
+        gif.style.opacity = '1';
+        // Hide immediately after 1 second
         setTimeout(() => {
-            if (gifElement) {
-                gifElement.style.opacity = '0';
-            }
+            gif.style.display = 'none';
         }, 1000);
     };
+
+    // Handle load errors gracefully
+    gif.onerror = cleanup;
+
+    // Force reload with timestamp to restart GIF
+    gif.src = `assets/lizard.gif?t=${Date.now()}`;
+    gifButton.appendChild(gif);
+
+    // Remove after GIF is hidden
+    setTimeout(cleanup, 1100);
 }
 
 // Create ripple effect
