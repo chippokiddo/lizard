@@ -5,6 +5,7 @@ let clickCount = 0;
 let userHasInteracted = false;
 let audioContext = null;
 let audioBuffer = null;
+let gifElement = null;
 
 // Device detection
 const isIOSDevice = () => /iPhone|iPad|iPod/i.test(navigator.userAgent);
@@ -85,29 +86,36 @@ async function playAudio() {
     }
 }
 
+// Initialize gif element
+function initializeGif() {
+    if (!gifElement) {
+        gifElement = document.createElement('img');
+        gifElement.className = 'gif-overlay';
+        gifElement.alt = 'Lizard animation';
+        gifElement.style.opacity = '0';
+        gifButton.appendChild(gifElement);
+    }
+}
+
 // Create and animate GIF
 function playGif() {
-    const gif = document.createElement('img');
-    gif.className = 'gif-overlay';
-    gif.alt = 'Lizard animation';
+    // Initialize gif element if it doesn't exist
+    if (!gifElement) {
+        initializeGif();
+    }
 
-    gif.onload = () => {
-        gif.style.opacity = '1';
-        // Hide after 1 second
-        setTimeout(() => gif.style.opacity = '0', 1000);
-    };
-
-    // Force reload with timestamp to restart GIF
-    gif.src = `assets/lizard.gif?t=${Date.now()}`;
-
-    gifButton.appendChild(gif);
-
-    // Remove after fade out
+    // Force reload with timestamp to restart GIF animation
+    gifElement.src = `assets/lizard.gif?t=${Date.now()}`;
+    
+    // Show the gif
+    gifElement.style.opacity = '1';
+    
+    // Hide after 1 second
     setTimeout(() => {
-        if (gif.parentNode) {
-            gif.remove();
+        if (gifElement) {
+            gifElement.style.opacity = '0';
         }
-    }, 1500);
+    }, 1000);
 }
 
 // Create ripple effect
@@ -220,6 +228,9 @@ document.addEventListener('click', async () => {
         await initializeAudio();
     }
 }, {once: true});
+
+// Initialize gif when DOM is ready
+document.addEventListener('DOMContentLoaded', initializeGif);
 
 // Cleanup on page hide/unload
 ['visibilitychange', 'beforeunload', 'pagehide'].forEach(event => {
