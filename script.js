@@ -86,36 +86,31 @@ async function playAudio() {
     }
 }
 
-// Initialize gif element
-function initializeGif() {
+// Create and animate GIF
+function playGif() {
+    // Create GIF element only once
     if (!gifElement) {
         gifElement = document.createElement('img');
         gifElement.className = 'gif-overlay';
         gifElement.alt = 'Lizard animation';
-        gifElement.style.opacity = '0';
         gifButton.appendChild(gifElement);
     }
-}
 
-// Create and animate GIF
-function playGif() {
-    // Initialize gif element if it doesn't exist
-    if (!gifElement) {
-        initializeGif();
-    }
-
+    // Reset opacity and restart GIF
+    gifElement.style.opacity = '0';
+    
     // Force reload with timestamp to restart GIF animation
     gifElement.src = `assets/lizard.gif?t=${Date.now()}`;
     
-    // Show the gif
-    gifElement.style.opacity = '1';
-    
-    // Hide after 1 second
-    setTimeout(() => {
-        if (gifElement) {
-            gifElement.style.opacity = '0';
-        }
-    }, 1000);
+    gifElement.onload = () => {
+        gifElement.style.opacity = '1';
+        // Hide after 1 second
+        setTimeout(() => {
+            if (gifElement) {
+                gifElement.style.opacity = '0';
+            }
+        }, 1000);
+    };
 }
 
 // Create ripple effect
@@ -228,9 +223,6 @@ document.addEventListener('click', async () => {
         await initializeAudio();
     }
 }, {once: true});
-
-// Initialize gif when DOM is ready
-document.addEventListener('DOMContentLoaded', initializeGif);
 
 // Cleanup on page hide/unload
 ['visibilitychange', 'beforeunload', 'pagehide'].forEach(event => {
